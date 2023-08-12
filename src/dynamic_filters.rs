@@ -1,8 +1,14 @@
 /*
-    Adding and/or and grouped/nested filter
+    Joins and nullable
 */
 
-use diesel::{connection::SimpleConnection, prelude::*, sql_types::Bool, sqlite::Sqlite};
+use diesel::{
+    connection::SimpleConnection,
+    helper_types::LeftJoinQuerySource,
+    prelude::*,
+    sql_types::{Bool, Nullable},
+    sqlite::Sqlite,
+};
 
 table! {
     test (id) {
@@ -13,12 +19,23 @@ table! {
     }
 }
 
+table! {
+    join_to_test (id) {
+        id -> Text,
+        test_id -> Text,
+        double_field -> Double,
+    }
+}
+
+joinable!(join_to_test -> test (test_id));
+allow_tables_to_appear_in_same_query!(test, join_to_test);
+
 // Filters for "numbers"
-enum NumberFilter {
-    Equal(i32),
-    NotEqual(i32),
-    GreaterThen(i32),
-    LowerThen(i32),
+enum NumberFilter<T> {
+    Equal(T),
+    NotEqual(T),
+    GreaterThen(T),
+    LowerThen(T),
 }
 // Filters for "strings"
 enum StringFilter {
@@ -34,15 +51,17 @@ enum AndOr {
 
 #[allow(non_camel_case_types)]
 enum Condition {
-    number_field(NumberFilter),
+    number_field(NumberFilter<i32>),
+    double_field(NumberFilter<f64>),
     text_field(StringFilter),
     bool_field(bool),
     And(Vec<Condition>),
     Or(Vec<Condition>),
 }
 
+type Source = LeftJoinQuerySource<test::dsl::test, join_to_test::dsl::join_to_test>;
 // Need this type for common condition expressions
-type BoxedCondition = Box<dyn BoxableExpression<test::dsl::test, Sqlite, SqlType = Bool>>;
+type BoxedCondition = Box<dyn BoxableExpression<Source, Sqlite, SqlType = Nullable<Bool>>>;
 
 fn create_filter(conditions: Vec<Condition>, and_or: AndOr) -> Option<BoxedCondition> {
     conditions
@@ -51,17 +70,47 @@ fn create_filter(conditions: Vec<Condition>, and_or: AndOr) -> Option<BoxedCondi
         .filter_map::<BoxedCondition, _>(|condition| {
             Some(match condition {
                 Condition::number_field(f) => match f {
-                    NumberFilter::Equal(value) => Box::new(test::dsl::number_field.eq(value)),
-                    NumberFilter::NotEqual(value) => Box::new(test::dsl::number_field.ne(value)),
-                    NumberFilter::GreaterThen(value) => Box::new(test::dsl::number_field.gt(value)),
-                    NumberFilter::LowerThen(value) => Box::new(test::dsl::number_field.lt(value)),
+                    NumberFilter::Equal(value) => {
+                        Box::new(test::dsl::number_field.eq(value).nullable())
+                    }
+                    NumberFilter::NotEqual(value) => {
+                        Box::new(test::dsl::number_field.ne(value).nullable())
+                    }
+                    NumberFilter::GreaterThen(value) => {
+                        Box::new(test::dsl::number_field.gt(value).nullable())
+                    }
+                    NumberFilter::LowerThen(value) => {
+                        Box::new(test::dsl::number_field.lt(value).nullable())
+                    }
+                },
+                Condition::double_field(f) => match f {
+                    NumberFilter::Equal(value) => {
+                        Box::new(join_to_test::dsl::double_field.eq(value).nullable())
+                    }
+                    NumberFilter::NotEqual(value) => {
+                        Box::new(join_to_test::dsl::double_field.ne(value).nullable())
+                    }
+                    NumberFilter::GreaterThen(value) => {
+                        Box::new(join_to_test::dsl::double_field.gt(value).nullable())
+                    }
+                    NumberFilter::LowerThen(value) => {
+                        Box::new(join_to_test::dsl::double_field.lt(value).nullable())
+                    }
                 },
                 Condition::text_field(f) => match f {
-                    StringFilter::Equal(value) => Box::new(test::dsl::text_field.eq(value)),
-                    StringFilter::NotEqual(value) => Box::new(test::dsl::text_field.ne(value)),
-                    StringFilter::Like(value) => Box::new(test::dsl::text_field.like(value)),
+                    StringFilter::Equal(value) => {
+                        Box::new(test::dsl::text_field.eq(value).nullable())
+                    }
+                    StringFilter::NotEqual(value) => {
+                        Box::new(test::dsl::text_field.ne(value).nullable())
+                    }
+                    StringFilter::Like(value) => {
+                        Box::new(test::dsl::text_field.like(value).nullable())
+                    }
                 },
-                Condition::bool_field(value) => Box::new(test::dsl::bool_field.eq(value)),
+                Condition::bool_field(value) => {
+                    Box::new(test::dsl::bool_field.eq(value).nullable())
+                }
                 Condition::And(conditions) => match create_filter(conditions, AndOr::And) {
                     Some(boxed_condition) => boxed_condition,
                     None => return None,
@@ -91,7 +140,7 @@ fn create__and_filter(conditions: Vec<Condition>) -> Option<BoxedCondition> {
 #[test]
 fn test() {
     let mut connection = SqliteConnection::establish("file:test?mode=memory&cache=shared").unwrap();
-    // See
+
     connection
         .batch_execute(
             r#"
@@ -100,6 +149,12 @@ fn test() {
                 number_field NUMBER NOT NULL,
                 text_field TEXT NOT NULL DEFAULT '',
                 bool_field BOOL NOT NULL DEFAULT false
+            );
+
+            CREATE TABLE join_to_test (
+                id TEXT PRIMARY KEY,
+                test_id TEXT REFERENCES test(id),
+                double_field DOUBLE NOT NULL
             );
 
             INSERT INTO test 
@@ -127,6 +182,7 @@ fn test() {
     assert_eq!(
         result,
         test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
             .filter(condition)
             .select(test::dsl::id)
             .load::<String>(&mut connection)
@@ -140,6 +196,7 @@ fn test() {
     assert_eq!(
         result,
         test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
             .filter(condition)
             .select(test::dsl::id)
             .order_by(test::dsl::id)
@@ -173,6 +230,7 @@ fn test() {
     assert_eq!(
         result,
         test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
             .filter(condition)
             .select(test::dsl::id)
             .load::<String>(&mut connection)
@@ -190,6 +248,7 @@ fn test() {
     assert_eq!(
         result,
         test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
             .filter(condition)
             .select(test::dsl::id)
             .load::<String>(&mut connection)
@@ -230,6 +289,7 @@ fn test() {
     assert_eq!(
         result,
         test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
             .filter(condition)
             .select(test::dsl::id)
             .load::<String>(&mut connection)
@@ -254,6 +314,38 @@ fn test() {
     assert_eq!(
         result,
         test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
+            .filter(condition)
+            .select(test::dsl::id)
+            .load::<String>(&mut connection)
+            .unwrap()
+    );
+
+    connection
+        .batch_execute(
+            r#"
+            INSERT INTO test 
+              (id, number_field) 
+            VALUES
+              ('6', 6);
+            
+            INSERT INTO join_to_test 
+              (id, test_id, double_field) 
+            VALUES
+              ('1', 6, 1.2);
+        "#,
+        )
+        .unwrap();
+
+    let condition =
+        create__and_filter(vec![Condition::double_field(NumberFilter::Equal(1.2))]).unwrap();
+
+    let result = vec!["6".to_string()];
+
+    assert_eq!(
+        result,
+        test::dsl::test
+            .left_join(join_to_test::dsl::join_to_test)
             .filter(condition)
             .select(test::dsl::id)
             .load::<String>(&mut connection)
