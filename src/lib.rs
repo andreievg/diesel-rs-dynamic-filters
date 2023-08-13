@@ -1,5 +1,5 @@
 mod dynamic_filters;
-
+mod inner_statement;
 // Filters for "numbers"
 enum NumberFilter<T> {
     Equal(T),
@@ -27,6 +27,7 @@ enum StringFilter {
     Equal(String),
     NotEqual(String),
     Like(String),
+    In(Vec<String>),
 }
 
 macro_rules! string_filter {
@@ -35,6 +36,7 @@ macro_rules! string_filter {
             StringFilter::Equal(value) => Box::new($dsl_field.eq(value).nullable()),
             StringFilter::NotEqual(value) => Box::new($dsl_field.ne(value).nullable()),
             StringFilter::Like(value) => Box::new($dsl_field.like(value).nullable()),
+            StringFilter::In(value) => Box::new($dsl_field.eq_any(value).nullable()),
         }
     }};
 }
