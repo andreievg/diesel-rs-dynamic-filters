@@ -1,5 +1,7 @@
 # Examples of dynamic filtering with [diesel-rs](https://github.com/diesel-rs/diesel)
 
+Also see example of [dynamic queries](https://github.com/andreievg/diesel-rs-dynamic-queries)
+
 ### Dynamic Filtering ?
 
 Quite often we want to build filters at runtime (i.e. from Graphql input), this requires a structure of defining dynamic filter shape and a mechanism to convert it to database queries.
